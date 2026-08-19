@@ -1,0 +1,4 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+img2pdf>=0.4.4
+Pillow>=10.0.0
