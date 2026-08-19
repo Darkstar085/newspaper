@@ -1,9 +1,10 @@
 import hashlib
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 import img2pdf
 import requests
@@ -18,6 +19,9 @@ from PIL import Image
 MIN_IMAGE_BYTES = 50_000
 MIN_WIDTH = 700
 MIN_HEIGHT = 900
+
+# Compression is a separate pass after all pages are downloaded.
+PDF_JPEG_QUALITY = 62
 
 _BAD_WORDS = {
     "logo", "icon", "arrow", "social", "menu", "favicon", "sprite",
@@ -146,55 +150,299 @@ def _download_candidate(session, url, referer):
 BASE = "https://epaper.pragativadi.com"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 
-def _image_from_page(session, page_url, page_no, seen):
-    response = session.get(page_url, headers=HEADERS, timeout=(5, 25))
-    response.raise_for_status()
-    candidates = _extract_image_candidates(response.text, response.url, page_no)
-
-    # Viewer routes are HTML pages, not newspaper images. Remove them before
-    # downloading candidates so /page/N cannot win as a false image source.
-    filtered = []
-    for score, u, reason in candidates:
-        low = u.lower()
-        if re.search(r"/edition/\d+/[^/]+/page(?:/|$)", urlparse(u).path, re.I):
-            continue
-        if re.search(r"/edition/\d+/[^/]+/page(?:/|$)", urlparse(u).path, re.I):
-            continue
-        if "default.jpg" in low or "imageprocessor" in low and "default.jpg" in low:
-            continue
-        # Reject non-image viewer/navigation URLs even when they contain /page/.
-        if re.search(r"/(?:page|edition)/[^.?#]*$", urlparse(u).path, re.I):
-            continue
-        filtered.append((score, u, reason))
-    candidates = filtered
-
-    # Direct e-paper uploads are substantially more trustworthy than generic
-    # page assets. Keep the requested page number as the primary signal.
-    for i, (score, u, reason) in enumerate(candidates):
-        low = u.lower()
-        if "/uploads/epaper/" in low:
-            candidates[i] = (score + 250, u, reason + " direct-epaper")
-        if re.search(rf"(?:page|pg|pageno|page_no|pageNo)[_-]?0*{page_no}(?:\\D|$)", low, re.I):
-            candidates[i] = (candidates[i][0] + 500, u, reason + " exact-page")
-
-    ranked = []
-    limit = min(len(candidates), 12)
-    for idx, (score, u, reason) in enumerate(candidates[:limit], 1):
-        print(f"   🔎 image candidate {idx}/{limit} — {u[:140]}", flush=True)
+def _fetch_page_response(session, page_url, page_no):
+    # Pragativadi occasionally returns a transient 5xx for an otherwise valid
+    # page route. Retry with backoff and a cache-busting query before giving up.
+    # This is intentionally page-generic; page 10 is not special.
+    retry_delays = (0.0, 1.5, 3.0, 6.0, 10.0)
+    last_error = None
+    variants = (
+        page_url,
+        f"{page_url}/",
+        f"{page_url}?_epaper_retry=1",
+        f"{page_url}?_epaper_retry=2",
+    )
+    attempt = 0
+    for delay in retry_delays:
+        if delay:
+            time.sleep(delay)
+        url = variants[min(attempt, len(variants) - 1)]
+        attempt += 1
         try:
-            result = _download_candidate(session, u, response.url)
-        except requests.RequestException:
-            continue
-        if not result:
-            continue
-        data, width, height, fmt, final_url = result
-        digest = hashlib.sha256(data).hexdigest()
-        if digest in seen:
-            score -= 1000
-        ranked.append((score, data, final_url, width, height, reason, digest))
-    if not ranked:
+            response = session.get(
+                url,
+                headers={**HEADERS, "Cache-Control": "no-cache", "Pragma": "no-cache"},
+                timeout=(5, 30),
+                allow_redirects=True,
+            )
+            if response.ok:
+                return response
+            last_error = requests.HTTPError(
+                f"HTTP {response.status_code} for {url}", response=response
+            )
+            if response.status_code not in {429, 500, 502, 503, 504}:
+                break
+            print(
+                f"   ⚠ Page {page_no}: viewer returned HTTP {response.status_code}; "
+                f"retrying ({attempt}/{len(retry_delays)})",
+                flush=True,
+            )
+        except requests.RequestException as exc:
+            last_error = exc
+            print(
+                f"   ⚠ Page {page_no}: viewer request failed ({exc}); "
+                f"retrying ({attempt}/{len(retry_delays)})",
+                flush=True,
+            )
+
+    if last_error:
+        raise last_error
+    raise requests.RequestException(f"Pragativadi: unable to fetch page {page_no}")
+
+
+def _page_variants(edition, page_no):
+    """Only real viewer endpoints; /page/<n> is HTML, never an image."""
+    base = edition.rstrip("/")
+    return [f"{base}/page/{page_no}", f"{base}/page/{page_no}/"]
+
+
+def _extract_image_candidates(html, page_url, page_no):
+    """
+    Extract actual raster/download URLs exposed by the Pragativadi viewer.
+    Navigation URLs such as /page/1 are deliberately rejected.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    candidates = []
+
+    def add(raw, score=0, reason=""):
+        if not raw:
+            return
+        raw = str(raw).strip().replace("\\/", "/").replace("&amp;", "&")
+        if raw.startswith(("data:", "javascript:", "mailto:", "tel:")):
+            return
+
+        raw = raw.replace("\\u0026", "&").replace("\\x26", "&")
+        u = _normalize_url(raw, page_url)
+        if not u:
+            return
+
+        low = u.lower()
+        path = low.split("?", 1)[0]
+
+        # Critical: never consider viewer/navigation pages to be images.
+        if re.search(r"/page(?:/\d+)?/?$", path):
+            return
+
+        is_raster = bool(re.search(r"\.(?:jpe?g|png|webp)(?:[?#]|$)", low))
+        is_image_endpoint = (
+            "imagedownload.php" in low or
+            "imageprocessor" in low
+        )
+        if not (is_raster or is_image_endpoint):
+            return
+
+        s = score
+        if is_raster:
+            s += 300
+        if "uploads/epaper/" in low:
+            s += 700
+        if "imagedownload.php" in low:
+            s += 600
+        if "imageprocessor" in low:
+            s += 100
+        if re.search(
+            rf"(?:page|pageno|pg|pagenumber)[_-]?0*{page_no}(?:\D|$)",
+            low, re.I
+        ):
+            s += 250
+        if re.search(
+            rf"(?:-|_)0*{page_no}\.(?:jpg|jpeg|png|webp)$",
+            low, re.I
+        ):
+            s += 250
+        s -= sum(200 for word in _BAD_WORDS if word in low)
+
+        candidates.append((s, u, reason))
+
+    # HTML image elements / lazy-loading attributes.
+    for tag in soup.find_all(["img", "source"]):
+        attrs = tag.attrs
+        for key in (
+            "src", "data-src", "data-original", "data-image",
+            "data-img", "data-url", "data-lazy-src",
+            "data-filename", "data-image-url"
+        ):
+            add(attrs.get(key), 200, key)
+
+        if attrs.get("srcset"):
+            for item in str(attrs["srcset"]).split(","):
+                add(item.strip().split()[0], 180, "srcset")
+
+    # Social/OG image metadata.
+    for tag in soup.find_all("meta"):
+        prop = (tag.get("property") or tag.get("name") or "").lower()
+        if prop in {"og:image", "twitter:image"}:
+            add(tag.get("content"), 120, prop)
+
+    # Inline JavaScript is often where the real page-image URL lives.
+    scripts = "\n".join(
+        s.string or s.get_text() or "" for s in soup.find_all("script")
+    )
+
+    for match in re.finditer(
+        r'(?:(?:https?:)?//|/)[^"\'\\\s<>]+?\.(?:jpe?g|png|webp)'
+        r'(?:\?[^"\'\\\s<>]*)?',
+        scripts, re.I
+    ):
+        add(match.group(0), 400, "script-raster")
+
+    # Quoted endpoint/asset strings.
+    for match in re.finditer(r'["\']([^"\']{3,1500})["\']', scripts):
+        raw = match.group(1)
+        low = raw.lower()
+        if any(k in low for k in (
+            "imagedownload", "imageprocessor",
+            "uploads/epaper", "uploads/",
+            ".jpg", ".jpeg", ".png", ".webp"
+        )):
+            add(raw, 350, "script-image")
+
+    # data-* / onclick attributes can contain the same values.
+    for tag in soup.find_all(True):
+        for key, value in tag.attrs.items():
+            if not (key.startswith("data-") or key.lower() in {"onclick", "href"}):
+                continue
+            if isinstance(value, list):
+                value = " ".join(value)
+            if not isinstance(value, str):
+                continue
+            for raw in re.findall(
+                r'(?:https?:)?//[^"\'\s)]+|/[^"\'\s)]+',
+                value
+            ):
+                add(raw, 180, key)
+
+    # Deduplicate by URL, retaining strongest score.
+    best = {}
+    for score, url, reason in candidates:
+        if url not in best or score > best[url][0]:
+            best[url] = (score, url, reason)
+
+    return sorted(best.values(), key=lambda x: x[0], reverse=True)
+
+
+def _download_candidate(session, url, referer):
+    """Fetch and strictly validate a real newspaper raster."""
+    r = session.get(
+        url,
+        headers={
+            "User-Agent": HEADERS["User-Agent"],
+            "Referer": referer,
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+        timeout=(10, 35),
+        allow_redirects=True,
+    )
+    if not r.ok:
         return None
-    return max(ranked, key=lambda x: x[0])
+
+    data = r.content
+    ctype = r.headers.get("Content-Type", "").lower()
+    if len(data) < MIN_IMAGE_BYTES or not _looks_like_image(data, ctype):
+        return None
+
+    info = _image_info(data)
+    if not info:
+        return None
+
+    width, height, fmt = info
+    if width < MIN_WIDTH or height < MIN_HEIGHT:
+        return None
+
+    ratio = width / height
+    if ratio > 1.35 or ratio < 0.40:
+        return None
+
+    return data, width, height, fmt, r.url
+
+
+def _image_from_page(session, edition, page_no, seen):
+    """
+    Resolve a newspaper page from the viewer HTML.
+
+    The old implementation made the fundamental mistake of treating
+    /page/<n> navigation URLs as image candidates. This resolver only
+    accepts actual JPG/PNG/WebP assets or image download endpoints.
+    """
+    for page_url in _page_variants(edition, page_no):
+        for attempt in range(3):
+            try:
+                if attempt:
+                    import time
+                    time.sleep(1.5 * (2 ** (attempt - 1)))
+
+                url = page_url
+                if attempt:
+                    url += ("&" if "?" in url else "?") + f"_cb={int(datetime.now().timestamp())}{attempt}"
+
+                response = session.get(
+                    url,
+                    headers={
+                        **HEADERS,
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache",
+                    },
+                    timeout=(10, 45),
+                )
+                response.raise_for_status()
+
+                candidates = _extract_image_candidates(
+                    response.text, response.url, page_no
+                )
+
+                print(
+                    f"   🔎 resolved {len(candidates)} actual image candidates",
+                    flush=True,
+                )
+
+                for idx, (score, image_url, reason) in enumerate(candidates, 1):
+                    print(
+                        f"   🔎 image candidate {idx}/{len(candidates)} — "
+                        f"{image_url[:180]}",
+                        flush=True,
+                    )
+                    try:
+                        result = _download_candidate(
+                            session, image_url, response.url
+                        )
+                    except requests.RequestException:
+                        continue
+
+                    if not result:
+                        continue
+
+                    data, width, height, fmt, final_url = result
+                    digest = hashlib.sha256(data).hexdigest()
+
+                    if digest in seen:
+                        continue
+
+                    return (
+                        score, data, final_url, width, height,
+                        reason, digest
+                    )
+
+            except requests.RequestException as exc:
+                print(
+                    f"   ⚠️ viewer attempt {attempt + 1}/3 failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+
+    return None
 
 def download_pragativadi():
     d = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -244,9 +492,8 @@ def download_pragativadi():
         print(f"🔎 Found {total} pages")
 
         for n in range(1, total+1):
-            print(f"📄 Pragativadi page {n}/{total} — opening viewer", flush=True)
-            page_url = f"{edition.rstrip('/')}/page/{n}"
-            result = _image_from_page(session, page_url, n, seen)
+            print(f"📄 Pragativadi page {n}/{total} — resolving viewer", flush=True)
+            result = _image_from_page(session, edition, n, seen)
             if not result:
                 raise RuntimeError(f"Pragativadi: no usable newspaper image found for page {n}")
             score, data, image_url, width, height, reason, digest = result
@@ -257,7 +504,37 @@ def download_pragativadi():
             fn.write_bytes(data); files.append(str(fn))
             print(f"✓ Page {n:02d} — {len(data)/1048576:.2f} MB — {width}x{height}")
 
-        with out.open("wb") as f: f.write(img2pdf.convert(files))
+        # Separate compression pass: all original pages have already been
+        # downloaded and validated. Nothing is removed from the download stage.
+        compressed_files = []
+        try:
+            for fn_str in files:
+                src_page = Path(fn_str)
+                compressed = src_page.with_name(src_page.stem + "_compressed.jpg")
+
+                with Image.open(src_page) as im:
+                    if im.mode != "RGB":
+                        im = im.convert("RGB")
+                    im.save(
+                        compressed,
+                        format="JPEG",
+                        quality=PDF_JPEG_QUALITY,
+                        optimize=True,
+                        progressive=True,
+                        subsampling="4:2:0",
+                    )
+
+                compressed_files.append(str(compressed))
+
+            with out.open("wb") as f:
+                f.write(img2pdf.convert(compressed_files))
+        finally:
+            for fn_str in compressed_files:
+                try:
+                    os.remove(fn_str)
+                except OSError:
+                    pass
+
         print(f"✅ Pragativadi PDF ready: {len(files)} pages / {out.stat().st_size/1048576:.2f} MB")
         return str(out)
     finally:
