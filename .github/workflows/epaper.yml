@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   run-scraper:
+    timeout-minutes: 35
     runs-on: ubuntu-latest
 
     steps:
@@ -38,7 +39,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py
+        run: python -u main.py
 
       - name: Persist delivery state
         run: |
