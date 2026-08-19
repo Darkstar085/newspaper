@@ -20,11 +20,19 @@
       "pages": null,
       "size_mb": 10.0,
       "uploader": "bot"
+    },
+    "prameya:2026-08-19": {
+      "sent_at": "2026-08-19T10:01:10.236993Z",
+      "sha256": "585d1ec98059af70841b8088c85ad24008494eeccc44d46edc55131f127dc007",
+      "pages": null,
+      "size_mb": 44.95,
+      "uploader": "bot"
     }
   },
   "hashes": {
     "4392aba70651043071fab0b4a436dc18608f7878d3be285af4e90ab3009c1743": "sambad:2026-08-19",
     "acb3b164126bd320bf391225eec02a53e85076041b2872482480bed9381c4b5d": "dharitri:2026-08-19",
-    "4db58f86680721bc7b3789962bed5164f5236bf5ab2b680113e27795cd2d7285": "samaja:2026-08-19"
+    "4db58f86680721bc7b3789962bed5164f5236bf5ab2b680113e27795cd2d7285": "samaja:2026-08-19",
+    "585d1ec98059af70841b8088c85ad24008494eeccc44d46edc55131f127dc007": "prameya:2026-08-19"
   }
 }
