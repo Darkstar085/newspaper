@@ -1,4 +1,14 @@
 {
-  "sent": {},
-  "hashes": {}
+  "sent": {
+    "sambad:2026-08-19": {
+      "sent_at": "2026-08-19T07:07:15.602004Z",
+      "sha256": "4392aba70651043071fab0b4a436dc18608f7878d3be285af4e90ab3009c1743",
+      "pages": null,
+      "size_mb": 8.71,
+      "uploader": "bot"
+    }
+  },
+  "hashes": {
+    "4392aba70651043071fab0b4a436dc18608f7878d3be285af4e90ab3009c1743": "sambad:2026-08-19"
+  }
 }
