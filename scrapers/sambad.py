@@ -1,6 +1,6 @@
 import os
-import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import img2pdf
@@ -17,17 +17,22 @@ HEADERS = {
 
 BASE = "https://sambadepaper.com/epaperimages"
 MAX_PAGES = 100
+MIN_IMAGE_SIZE = 50_000
 
 
-def _is_jpeg(data: bytes) -> bool:
-    return len(data) >= 4 and data[:2] == b"\xff\xd8" and data[-2:] == b"\xff\xd9"
+def is_jpeg(data: bytes) -> bool:
+    return (
+        len(data) >= 4
+        and data[:2] == b"\xff\xd8"
+        and data[-2:] == b"\xff\xd9"
+    )
 
 
-def _download_page(session, url, path, page):
+def download_page(session: requests.Session, url: str, path: Path, page: int):
     response = session.get(
         url,
         headers=HEADERS,
-        timeout=(10, 30),
+        timeout=(10, 45),
         allow_redirects=True,
     )
 
@@ -36,18 +41,15 @@ def _download_page(session, url, path, page):
 
     content_type = response.headers.get("Content-Type", "").lower()
 
-    # The Sambad endpoint should return an actual JPEG. Reject HTML/UI
-    # responses rather than putting them into the PDF.
-    if "image/" not in content_type and not _is_jpeg(response.content):
-        return False, f"unexpected Content-Type: {content_type or 'unknown'}"
+    if "image/" not in content_type and not is_jpeg(response.content):
+        return False, f"not an image ({content_type or 'unknown content-type'})"
 
-    if not _is_jpeg(response.content):
-        return False, "response is not a JPEG"
+    if not is_jpeg(response.content):
+        return False, "response is not JPEG"
 
     size = len(response.content)
 
-    # Newspaper pages should be substantially larger than tiny UI assets.
-    if size < 50_000:
+    if size < MIN_IMAGE_SIZE:
         return False, f"image too small ({size / 1024:.1f} KB)"
 
     path.write_bytes(response.content)
@@ -55,55 +57,64 @@ def _download_page(session, url, path, page):
 
 
 def download_sambad() -> str | None:
-    """Download today's Sambad Bhubaneswar e-paper pages and build a PDF."""
-
     today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d%m%Y")
-    output_pdf = f"Sambad_{today}.pdf"
-
+    output_pdf = Path(f"Sambad_bhubaneswar_{today}.pdf")
     downloaded = []
+
+    print("=" * 60)
+    print(f"📰 SAMBAD — BHUBANESWAR — {today}")
+    print("=" * 60)
+    print("🔎 Using direct Sambad e-paper image endpoint")
 
     session = requests.Session()
 
     try:
-        print(f"📰 SAMBAD — {today}")
-        print("🔎 Downloading page images...")
-
         for page in range(1, MAX_PAGES + 1):
             filename = f"sambad_{page:02d}.jpg"
             path = Path(filename)
 
             url = f"{BASE}/{today}/{today}-md-hr-{page}.jpg"
 
-            ok, detail = _download_page(session, url, path, page)
+            print(f"📥 Page {page:02d}...", end=" ", flush=True)
+
+            ok, detail = download_page(session, url, path, page)
 
             if not ok:
-                if page == 1:
-                    print(f"❌ Page 01 unavailable: {detail}")
-                    return None
+                print(f"⏹ {detail}")
 
-                print(f"⏹ Page {page:02d}: {detail}")
-                print(f"✓ End of edition — {len(downloaded)} pages found")
+                # Page 1 failing means today's edition wasn't available.
+                if page == 1:
+                    raise RuntimeError(
+                        f"Sambad page 1 unavailable: {detail}"
+                    )
+
+                # The first unavailable page marks the end of the edition.
                 break
 
             downloaded.append(str(path))
-            print(f"✓ Page {page:02d} — {detail}")
+            print(f"✓ {detail}")
 
         if not downloaded:
-            return None
+            raise RuntimeError("No Sambad pages downloaded")
 
-        print(f"📦 Building PDF from {len(downloaded)} pages...")
+        print("-" * 60)
+        print(f"📄 Building PDF from {len(downloaded)} pages...")
 
-        with open(output_pdf, "wb") as f:
-            f.write(img2pdf.convert(downloaded))
+        with output_pdf.open("wb") as pdf:
+            pdf.write(img2pdf.convert(downloaded))
 
-        size_mb = os.path.getsize(output_pdf) / 1048576
-        print(f"✓ Sambad PDF ready: {len(downloaded)} pages / {size_mb:.1f} MB")
+        size_mb = output_pdf.stat().st_size / 1048576
 
-        return output_pdf
+        print(f"✅ Sambad PDF ready")
+        print(f"   Pages : {len(downloaded)}")
+        print(f"   Size  : {size_mb:.1f} MB")
+        print(f"   File  : {output_pdf}")
+
+        return str(output_pdf)
 
     except Exception as exc:
-        print(f"❌ Error downloading Sambad: {type(exc).__name__}: {exc}")
-        return None
+        print(f"❌ Sambad scraper failed: {type(exc).__name__}: {exc}")
+        raise
 
     finally:
         for filename in downloaded:
