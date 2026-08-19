@@ -12,40 +12,63 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Delete caches
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: gh cache delete --all --confirm
-
-      - name: Delete workflow runs older than 30 days
+      - name: Delete all caches
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         shell: bash
         run: |
-          cutoff="$(date -u -d '30 days ago' +%s)"
+          echo "Deleting all GitHub Actions caches..."
 
-          gh api --paginate             "/repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100"             --jq '.workflow_runs[] | [.id, .created_at] | @tsv' |
-          while IFS=$'\t' read -r run_id created_at; do
-            created="$(date -u -d "$created_at" +%s)"
-            if [ "$created" -lt "$cutoff" ]; then
-              gh api --method DELETE                 "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
-              echo "Deleted workflow run ${run_id} (${created_at})"
+          gh api --paginate \
+            "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '.actions_caches[].id' |
+          while read -r cache_id; do
+            if [ -n "$cache_id" ]; then
+              gh api --method DELETE \
+                "/repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}"
+
+              echo "Deleted cache ${cache_id}"
             fi
           done
 
-      - name: Delete artifacts older than 30 days
+          echo "Cache cleanup completed."
+
+      - name: Keep latest workflow run and delete older runs
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         shell: bash
         run: |
-          cutoff="$(date -u -d '30 days ago' +%s)"
+          echo "Finding workflow runs..."
 
-          gh api --paginate             "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100"             --jq '.artifacts[] | [.id, .created_at] | @tsv' |
-          while IFS=$'\t' read -r artifact_id created_at; do
-            created="$(date -u -d "$created_at" +%s)"
-            if [ "$created" -lt "$cutoff" ]; then
-              gh api --method DELETE                 "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
-              echo "Deleted artifact ${artifact_id} (${created_at})"
+          runs="$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --limit 1000 \
+            --json databaseId,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[].databaseId')"
+
+          latest_run="$(echo "$runs" | head -n 1)"
+
+          if [ -z "$latest_run" ]; then
+            echo "No workflow runs found."
+            exit 0
+          fi
+
+          echo "Keeping latest workflow run: ${latest_run}"
+
+          echo "$runs" |
+          tail -n +2 |
+          while read -r run_id; do
+            if [ -n "$run_id" ]; then
+              echo "Deleting workflow run: ${run_id}"
+
+              gh api \
+                --method DELETE \
+                "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+
+              echo "Deleted workflow run: ${run_id}"
             fi
           done
+
+          echo "Workflow run cleanup completed."
