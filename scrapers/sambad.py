@@ -82,13 +82,11 @@ def download_sambad() -> str | None:
             if not ok:
                 print(f"⏹ {detail}")
 
-                # Page 1 failing means today's edition wasn't available.
                 if page == 1:
                     raise RuntimeError(
                         f"Sambad page 1 unavailable: {detail}"
                     )
 
-                # The first unavailable page marks the end of the edition.
                 break
 
             downloaded.append(str(path))

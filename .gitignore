@@ -1,0 +1,7 @@
+*.pdf
+*_page_*.jpg
+*_page_*.webp
+*.session
+*.session-journal
+__pycache__/
+.pytest_cache/

@@ -9,7 +9,6 @@ import img2pdf
 import requests
 
 import io
-import re
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -161,7 +160,6 @@ def _extract_page_routes(html, edition):
         except Exception: return
         if not 1 <= n <= 100 or not raw: return
         raw = raw.strip()
-        # Ignore javascript handlers themselves; extract URL-like arguments.
         if raw.lower().startswith("javascript:"):
             urls = re.findall(r'(?:https?:)?//[^"\'\s)]+|/[^"\'\s)]+', raw)
             for u in urls:
@@ -182,7 +180,6 @@ def _extract_page_routes(html, edition):
                 if tag.get(key):
                     add(n, tag.get(key))
 
-    # JS/data blobs often contain page number + route pairs.
     for m in re.finditer(
         r'(?:page|pageno|page_no|pageNo)\s*["\']?\s*[:=]\s*["\']?(\d{1,3})[^{}\n]{0,250}?(?:url|href|link)\s*["\']?\s*[:=]\s*["\']([^"\']+)',
         html, re.I
@@ -192,8 +189,6 @@ def _extract_page_routes(html, edition):
     return sorted(found.items())
 
 def _fallback_page_urls(edition, n):
-    # The current Prameya viewer has used several URL conventions. Try all
-    # known forms instead of assuming /page/N.
     variants = [
         f"{edition.rstrip('/')}/page/{n}",
         f"{edition.rstrip('/')}/{n}",
@@ -210,8 +205,6 @@ PRAMEYA_CDN_RE = re.compile(r"/FilesUpload/\d{4}/\d{1,2}/\d{1,2}/(\d+)_(\d+)_([a
 def _page_image(session, html, page_url, page_no, seen, edition_id):
     candidates = _extract_image_candidates(html, page_url, page_no)
 
-    # Prameya pages expose the entire CDN image list in the viewer HTML.
-    # Select by the actual filename page number BEFORE truncating candidates.
     exact = []
     for score, u, reason in candidates:
         m = PRAMEYA_CDN_RE.search(urlparse(u).path)
@@ -222,8 +215,6 @@ def _page_image(session, html, page_url, page_no, seen, edition_id):
         candidates = exact
         print(f"   🎯 exact Prameya page-image candidates: {len(candidates)}", flush=True)
     else:
-        # Never allow a generic page to silently become the requested page.
-        # Keep fallback candidates only for diagnostics/recovery.
         candidates = candidates[:20]
         print(f"   ⚠ No exact CDN page match found; fallback candidates: {len(candidates)}", flush=True)
 
@@ -317,8 +308,6 @@ def download_prameya():
         routes = dict(_extract_page_routes(edition_html, edition))
         print(f"🔗 Resolved explicit page routes: {len(routes)}/{total}")
 
-        # If a route is not present, try the viewer's current query/route
-        # variants and resolve the image from the returned HTML.
         for n in range(1, total + 1):
             print(f"📄 Prameya page {n}/{total} — resolving viewer", flush=True)
             result = _fetch_page_image(session, edition, n, routes, seen, edition_id)
@@ -331,8 +320,6 @@ def download_prameya():
                 )
             seen.add(digest)
             fn = Path(f"prameya_page_{n:02d}.jpg")
-            # The CDN currently returns WebP. Convert it to a real JPEG before
-            # passing it to img2pdf; do not merely rename WebP bytes as .jpg.
             with Image.open(io.BytesIO(data)) as im:
                 im = im.convert("RGB")
                 im.save(

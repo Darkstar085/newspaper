@@ -2,8 +2,7 @@ name: Daily Odia E-Paper Downloader
 
 on:
   schedule:
-    # Runs daily at 00:30 UTC / 06:00 AM IST
-    - cron: '30 0 * * *'
+    - cron: "30 0 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,7 +14,7 @@ concurrency:
 
 jobs:
   run-scraper:
-    timeout-minutes: 35
+    timeout-minutes: 45
     runs-on: ubuntu-latest
 
     steps:
@@ -27,8 +26,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -39,19 +38,18 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: python -u main.py
 
       - name: Persist delivery state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add state.json
-
           if git diff --cached --quiet; then
             echo "No delivery-state changes to commit."
             exit 0
           fi
-
           git commit -m "chore: update newspaper delivery state"
           git push

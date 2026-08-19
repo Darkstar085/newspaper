@@ -1,0 +1,51 @@
+name: Monthly GitHub Actions Cleanup
+
+on:
+  schedule:
+    - cron: "15 2 1 * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: gh cache delete --all --confirm
+
+      - name: Delete workflow runs older than 30 days
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        shell: bash
+        run: |
+          cutoff="$(date -u -d '30 days ago' +%s)"
+
+          gh api --paginate             "/repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100"             --jq '.workflow_runs[] | [.id, .created_at] | @tsv' |
+          while IFS=$'\t' read -r run_id created_at; do
+            created="$(date -u -d "$created_at" +%s)"
+            if [ "$created" -lt "$cutoff" ]; then
+              gh api --method DELETE                 "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+              echo "Deleted workflow run ${run_id} (${created_at})"
+            fi
+          done
+
+      - name: Delete artifacts older than 30 days
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        shell: bash
+        run: |
+          cutoff="$(date -u -d '30 days ago' +%s)"
+
+          gh api --paginate             "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100"             --jq '.artifacts[] | [.id, .created_at] | @tsv' |
+          while IFS=$'\t' read -r artifact_id created_at; do
+            created="$(date -u -d "$created_at" +%s)"
+            if [ "$created" -lt "$cutoff" ]; then
+              gh api --method DELETE                 "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+              echo "Deleted artifact ${artifact_id} (${created_at})"
+            fi
+          done

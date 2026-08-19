@@ -96,8 +96,6 @@ def image_candidates(html, page_url_value, page_no):
             page_bonus += 40
         found.append((score + page_bonus - penalty, u, reason))
 
-    # Main image-like elements. Attribute dimensions are a useful signal
-    # because the viewer's newspaper page is much larger than UI images.
     for tag in soup.find_all(["img", "source"]):
         attrs = tag.attrs
         urls = []
@@ -117,13 +115,11 @@ def image_candidates(html, page_url_value, page_no):
         for u in urls:
             add(u, area_score, f"img {w}x{h}")
 
-    # OpenGraph / Twitter image metadata.
     for meta in soup.find_all("meta"):
         prop = (meta.get("property") or meta.get("name") or "").lower()
         if prop in {"og:image", "twitter:image"}:
             add(meta.get("content"), 80, prop)
 
-    # Some versions of the CMS put the viewer image in inline JS/JSON.
     for script in soup.find_all("script"):
         text = script.string or script.get_text() or ""
         for match in re.findall(r"(?:https?:)?//[^\"'\\s]+\.(?:jpe?g|png|webp)(?:\?[^\"'\\s]+)?", text, re.I):
@@ -152,8 +148,6 @@ def download_and_validate_image(session, url):
     if width < MIN_WIDTH or height < MIN_HEIGHT:
         raise RuntimeError(f"too small dimensions ({width}x{height})")
 
-    # Newspaper pages are portrait-oriented. This rejects logos and most UI
-    # graphics without assuming an exact pixel size.
     ratio = width / height
     if ratio > 1.15 or ratio < 0.45:
         raise RuntimeError(f"unlikely newspaper page ratio ({width}x{height})")
@@ -189,8 +183,6 @@ def find_page_images(session, edition_url):
                 last_error = exc
 
         if accepted is None:
-            # Once a page URL exists but contains no usable newspaper image,
-            # treat the edition as incomplete rather than silently shortening it.
             print(f"   ✗ Page {page_no}: no valid page image ({last_error})")
             raise RuntimeError(f"Dharitri page {page_no} has no valid newspaper image")
 

@@ -11,16 +11,12 @@ import requests
 from bs4 import BeautifulSoup
 
 import io
-import re
-from urllib.parse import urljoin
-from bs4 import BeautifulSoup
 from PIL import Image
 
 MIN_IMAGE_BYTES = 50_000
 MIN_WIDTH = 700
 MIN_HEIGHT = 900
 
-# Compression is a separate pass after all pages are downloaded.
 PDF_JPEG_QUALITY = 62
 
 _BAD_WORDS = {
@@ -151,9 +147,6 @@ BASE = "https://epaper.pragativadi.com"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 
 def _fetch_page_response(session, page_url, page_no):
-    # Pragativadi occasionally returns a transient 5xx for an otherwise valid
-    # page route. Retry with backoff and a cache-busting query before giving up.
-    # This is intentionally page-generic; page 10 is not special.
     retry_delays = (0.0, 1.5, 3.0, 6.0, 10.0)
     last_error = None
     variants = (
@@ -229,7 +222,6 @@ def _extract_image_candidates(html, page_url, page_no):
         low = u.lower()
         path = low.split("?", 1)[0]
 
-        # Critical: never consider viewer/navigation pages to be images.
         if re.search(r"/page(?:/\d+)?/?$", path):
             return
 
@@ -264,7 +256,6 @@ def _extract_image_candidates(html, page_url, page_no):
 
         candidates.append((s, u, reason))
 
-    # HTML image elements / lazy-loading attributes.
     for tag in soup.find_all(["img", "source"]):
         attrs = tag.attrs
         for key in (
@@ -278,13 +269,11 @@ def _extract_image_candidates(html, page_url, page_no):
             for item in str(attrs["srcset"]).split(","):
                 add(item.strip().split()[0], 180, "srcset")
 
-    # Social/OG image metadata.
     for tag in soup.find_all("meta"):
         prop = (tag.get("property") or tag.get("name") or "").lower()
         if prop in {"og:image", "twitter:image"}:
             add(tag.get("content"), 120, prop)
 
-    # Inline JavaScript is often where the real page-image URL lives.
     scripts = "\n".join(
         s.string or s.get_text() or "" for s in soup.find_all("script")
     )
@@ -296,7 +285,6 @@ def _extract_image_candidates(html, page_url, page_no):
     ):
         add(match.group(0), 400, "script-raster")
 
-    # Quoted endpoint/asset strings.
     for match in re.finditer(r'["\']([^"\']{3,1500})["\']', scripts):
         raw = match.group(1)
         low = raw.lower()
@@ -307,7 +295,6 @@ def _extract_image_candidates(html, page_url, page_no):
         )):
             add(raw, 350, "script-image")
 
-    # data-* / onclick attributes can contain the same values.
     for tag in soup.find_all(True):
         for key, value in tag.attrs.items():
             if not (key.startswith("data-") or key.lower() in {"onclick", "href"}):
@@ -322,7 +309,6 @@ def _extract_image_candidates(html, page_url, page_no):
             ):
                 add(raw, 180, key)
 
-    # Deduplicate by URL, retaining strongest score.
     best = {}
     for score, url, reason in candidates:
         if url not in best or score > best[url][0]:
@@ -504,8 +490,6 @@ def download_pragativadi():
             fn.write_bytes(data); files.append(str(fn))
             print(f"✓ Page {n:02d} — {len(data)/1048576:.2f} MB — {width}x{height}")
 
-        # Separate compression pass: all original pages have already been
-        # downloaded and validated. Nothing is removed from the download stage.
         compressed_files = []
         try:
             for fn_str in files:

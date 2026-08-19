@@ -8,7 +8,6 @@ import img2pdf
 import requests
 
 import io
-import re
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -147,8 +146,6 @@ SUBCODE = 73
 HEADERS = {"User-Agent": "Mozilla/5.0 Chrome/120 Safari/537.36"}
 
 def _page_url_variants(ds, n):
-    # pgnum is the current viewer parameter; keep a few legacy aliases because
-    # Samaja has changed the viewer implementation more than once.
     keys = ("pgnum", "pageno", "page", "page_no", "pgno")
     urls = []
     for key in keys:
@@ -226,9 +223,6 @@ def download_samaja():
                     continue
                 result = _find_page_image(session, page.text, page.url, n, seen)
                 if result:
-                    # Prefer a page-specific image. If the first endpoint returns
-                    # page 1 for every request, a duplicate will score lower and
-                    # the next parameter variant gets a chance.
                     selected = result
                     if result[-1] not in seen:
                         break
