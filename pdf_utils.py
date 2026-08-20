@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-import fitz
+import pymupdf
 
 
 MAX_BOT_API_MB = 49.0
@@ -29,7 +29,7 @@ def compress_pdf_for_upload(pdf_path, max_mb=MAX_BOT_API_MB):
 
     for dpi, quality in attempts:
         temp = path.with_name(f".{path.stem}_compressed_{dpi}.pdf")
-        source = fitz.open(path)
+        source = pymupdf.open(path)
         try:
             page_count = source.page_count
             source.rewrite_images(
@@ -57,7 +57,7 @@ def compress_pdf_for_upload(pdf_path, max_mb=MAX_BOT_API_MB):
         try:
             candidate_size = pdf_size_mb(temp)
             if candidate_size < best_size:
-                check = fitz.open(temp)
+                check = pymupdf.open(temp)
                 valid_pages = check.page_count == page_count
                 check.close()
                 if valid_pages:
