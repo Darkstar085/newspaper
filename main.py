@@ -80,14 +80,15 @@ def main():
             owner = hash_owner(state, pdf_hash)
             if owner:
                 print(f"⏭ Exact PDF already sent under: {owner}")
-                state["sent"][key] = {
-                    "sent_at": state["sent"][owner].get("sent_at"),
-                    "sha256": pdf_hash,
-                    "size_mb": round(size_mb, 2),
-                    "uploader": "duplicate-skip",
-                    "duplicate_of": owner,
-                }
-                save_state(state)
+                record_sent(
+                    state,
+                    name,
+                    today,
+                    pdf_hash,
+                    size_mb=size_mb,
+                    uploader="duplicate-skip",
+                    duplicate_of=owner,
+                )
                 continue
 
             caption = build_caption(name, today)

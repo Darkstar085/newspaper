@@ -1,40 +1,5 @@
 {
   "sent": {
-    "samaja:2026-08-19": {
-      "sent_at": "2026-08-19T11:12:10.612026Z",
-      "sha256": "865c01e86dfa0d7190f1ba2fde472c8becbdfdd1ec8cfdf1043cc4e4e1782494",
-      "pages": null,
-      "size_mb": 10.0,
-      "uploader": "bot"
-    },
-    "sambad:2026-08-19": {
-      "sent_at": "2026-08-19T11:12:20.403778Z",
-      "sha256": "8b34bb763c0ffe4acdde307a5aa495d6f4e4e2d2a959409f4efac2de5630639b",
-      "pages": null,
-      "size_mb": 8.91,
-      "uploader": "bot"
-    },
-    "dharitri:2026-08-19": {
-      "sent_at": "2026-08-19T11:13:06.547573Z",
-      "sha256": "c10af9c40c3ed81c3730ca33d7a529579958764c7c8f3932be63792f4d2948a7",
-      "pages": null,
-      "size_mb": 34.42,
-      "uploader": "bot"
-    },
-    "pragativadi:2026-08-19": {
-      "sent_at": "2026-08-19T11:13:35.856068Z",
-      "sha256": "cfcb9124e51fa517dc85e2fdb9826b46048899a28973407577df81fba52f242a",
-      "pages": null,
-      "size_mb": 15.54,
-      "uploader": "bot"
-    },
-    "prameya:2026-08-19": {
-      "sent_at": "2026-08-19T11:14:26.897183Z",
-      "sha256": "e199807b2a4138fb84f0e779d4767f32db97533e13fb50ec08114ddca7471e3a",
-      "pages": null,
-      "size_mb": 44.95,
-      "uploader": "bot"
-    },
     "samaja:2026-08-20": {
       "sent_at": "2026-08-20T03:19:03.859129Z",
       "sha256": "19f4f429701d59de1ff6b0bc0979be144c7ea1ea3a3d8c69b812cf2be7b7d731",
@@ -72,11 +37,6 @@
     }
   },
   "hashes": {
-    "865c01e86dfa0d7190f1ba2fde472c8becbdfdd1ec8cfdf1043cc4e4e1782494": "samaja:2026-08-19",
-    "8b34bb763c0ffe4acdde307a5aa495d6f4e4e2d2a959409f4efac2de5630639b": "sambad:2026-08-19",
-    "c10af9c40c3ed81c3730ca33d7a529579958764c7c8f3932be63792f4d2948a7": "dharitri:2026-08-19",
-    "cfcb9124e51fa517dc85e2fdb9826b46048899a28973407577df81fba52f242a": "pragativadi:2026-08-19",
-    "e199807b2a4138fb84f0e779d4767f32db97533e13fb50ec08114ddca7471e3a": "prameya:2026-08-19",
     "19f4f429701d59de1ff6b0bc0979be144c7ea1ea3a3d8c69b812cf2be7b7d731": "samaja:2026-08-20",
     "5e1212197e019306de2d4899236ed5fcceec74779d996fb86ddafe3d2dd7589f": "sambad:2026-08-20",
     "0b1b936e22bd49797c0363ed524ba9fa74ea4256a4bf0c5349939cd300063b7d": "dharitri:2026-08-20",
