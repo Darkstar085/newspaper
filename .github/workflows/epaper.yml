@@ -53,5 +53,52 @@ jobs:
             echo "No delivery-state changes to commit."
             exit 0
           fi
-          git commit -m "chore: update newspaper delivery state"
+          edition_date="$(python - <<'PY'
+          import json
+
+          with open("state.json", encoding="utf-8") as f:
+              state = json.load(f)
+
+          dates = [key.split(":", 1)[1] for key in state.get("sent", {}) if ":" in key]
+          print(max(dates) if dates else "unknown")
+          PY
+          )"
+
+          delivery_summary="$(python - <<'PY'
+          import json
+
+          with open("state.json", encoding="utf-8") as f:
+              state = json.load(f)
+
+          items = []
+          for key, info in state.get("sent", {}).items():
+              if ":" not in key:
+                  continue
+              newspaper, date = key.split(":", 1)
+              items.append((date, newspaper, info.get("size_mb")))
+
+          for date, newspaper, size_mb in sorted(items, reverse=True):
+              size = f" — {size_mb:.2f} MB" if isinstance(size_mb, (int, float)) else ""
+              print(f"- {newspaper.title()}: {date}{size}")
+          PY
+          )"
+
+          commit_title="chore: update daily newspaper delivery state — ${edition_date}"
+          commit_body="$(cat <<EOF
+          📰 Daily Odisha E-Paper Delivery
+
+          📅 Latest edition: ${edition_date}
+
+          ✅ Successfully delivered:
+          ${delivery_summary}
+
+          📦 Delivery state updated
+          🔐 SHA-256 hashes recorded
+          🔄 Duplicate tracking refreshed
+
+          🤖 Automated by GitHub Actions
+          EOF
+          )"
+
+          git commit -m "$commit_title" -m "$commit_body"
           git push
